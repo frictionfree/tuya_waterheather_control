@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Schedule - Water Heater{% endblock %}
+
+{% block header %}Schedule Configuration{% endblock %}
+
+{% block content %}
+    <div class="config-section">
+        <h3>Add Time Range</h3>
+        <form method="POST" action="{{ url_for('add_time_range') }}" class="time-form">
+            <div class="time-inputs">
+                <div class="time-input-group">
+                    <label>Start Time</label>
+                    <input type="time" name="start_time" required>
+                </div>
+                <div class="time-divider">to</div>
+                <div class="time-input-group">
+                    <label>End Time</label>
+                    <input type="time" name="end_time" required>
+                </div>
+            </div>
+            <button type="submit" class="add-btn">Add Schedule</button>
+        </form>
+    </div>
+    
+    <div class="schedule-list">
+        <h3>Current Schedules</h3>
+        {% if time_ranges %}
+            {% for range in time_ranges %}
+                <div class="schedule-item {{ 'enabled' if range.enabled else 'disabled' }}">
+                    <div class="schedule-time">
+                        {{ range.start_time }} - {{ range.end_time }}
+                    </div>
+                    <div class="schedule-actions">
+                        <form method="POST" action="{{ url_for('delete_time_range', range_id=range.id) }}" style="display: inline;">
+                            <button type="submit" class="delete-btn" onclick="return confirm('Delete this schedule?')">
+                                🗑️
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="no-schedules">
+                <p>No scheduled times configured.</p>
+                <p class="hint">Add time ranges when the water heater should automatically turn ON.</p>
+            </div>
+        {% endif %}
+    </div>
+    
+    <div class="info-section">
+        <h4>How it works:</h4>
+        <ul>
+            <li>Schedules run automatically in Israel timezone</li>
+            <li>Manual button overrides schedule for 24 hours</li>
+            <li>Multiple time ranges can overlap</li>
+            <li>Overnight ranges (e.g. 23:00-06:00) are supported</li>
+        </ul>
+    </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .config-section {
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    
+    .config-section h3 {
+        color: #4a5568;
+        margin-bottom: 1rem;
+        font-size: 1.1rem;
+    }
+    
+    .time-form {
+        background: #f7fafc;
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
+    
+    .time-inputs {
+        display: flex;
+        align-items: end;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        justify-content: center;
+    }
+    
+    .time-input-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .time-input-group label {
+        font-size: 0.85rem;
+        color: #718096;
+        margin-bottom: 0.5rem;
+    }
+    
+    .time-input-group input[type="time"] {
+        padding: 0.75rem;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 1rem;
+        background: white;
+        min-width: 120px;
+    }
+    
+    .time-input-group input[type="time"]:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    
+    .time-divider {
+        color: #718096;
+        font-size: 0.9rem;
+        margin: 0 0.5rem;
+        padding-top: 0.75rem;
+    }
+    
+    .add-btn {
+        width: 100%;
+        padding: 0.75rem;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    
+    .add-btn:hover {
+        background: #5a67d8;
+    }
+    
+    .schedule-list h3 {
+        color: #4a5568;
+        margin-bottom: 1rem;
+        font-size: 1.1rem;
+    }
+    
+    .schedule-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        background: #f7fafc;
+        border-radius: 8px;
+        margin-bottom: 0.75rem;
+        border: 2px solid transparent;
+    }
+    
+    .schedule-item.enabled {
+        border-color: #38b2ac;
+        background: #e6fffa;
+    }
+    
+    .schedule-item.disabled {
+        opacity: 0.6;
+        background: #edf2f7;
+    }
+    
+    .schedule-time {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #2d3748;
+    }
+    
+    .schedule-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .delete-btn {
+        background: #fed7d7;
+        border: 1px solid #fc8181;
+        border-radius: 6px;
+        padding: 0.5rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: background 0.2s;
+    }
+    
+    .delete-btn:hover {
+        background: #fbb6ce;
+    }
+    
+    .no-schedules {
+        text-align: center;
+        color: #718096;
+        background: #f7fafc;
+        padding: 2rem 1rem;
+        border-radius: 8px;
+    }
+    
+    .no-schedules p {
+        margin-bottom: 0.5rem;
+    }
+    
+    .no-schedules .hint {
+        font-size: 0.85rem;
+        font-style: italic;
+    }
+    
+    .info-section {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #e2e8f0;
+    }
+    
+    .info-section h4 {
+        color: #4a5568;
+        margin-bottom: 0.75rem;
+        font-size: 1rem;
+    }
+    
+    .info-section ul {
+        color: #718096;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        padding-left: 1.2rem;
+    }
+    
+    .info-section li {
+        margin-bottom: 0.25rem;
+    }
+    
+    /* Mobile optimizations */
+    @media (max-width: 480px) {
+        .time-inputs {
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        
+        .time-divider {
+            padding: 0;
+            text-align: center;
+        }
+        
+        .schedule-item {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+        
+        .schedule-actions {
+            align-self: flex-end;
+        }
+        
+        .time-input-group input[type="time"] {
+            min-width: 140px;
+        }
+    }
+</style>
+{% endblock %}

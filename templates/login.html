@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% set hide_nav = true %}
+
+{% block title %}Login - Water Heater Control{% endblock %}
+
+{% block header %}Water Heater Login{% endblock %}
+
+{% block content %}
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    <form method="POST" action="{{ url_for('login') }}">
+        <div class="form-group">
+            <input 
+                type="password" 
+                name="password" 
+                placeholder="Enter password" 
+                required 
+                autofocus
+                class="password-input"
+            >
+        </div>
+        
+        <button type="submit" class="login-btn">
+            Login
+        </button>
+    </form>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+    
+    .password-input {
+        width: 100%;
+        padding: 1rem;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        text-align: center;
+        transition: border-color 0.2s;
+    }
+    
+    .password-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    
+    .login-btn {
+        width: 100%;
+        padding: 1rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .login-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .login-btn:active {
+        transform: translateY(0);
+    }
+</style>
+{% endblock %}

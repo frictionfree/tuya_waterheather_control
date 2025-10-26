@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+
+{% block title %}Control - Water Heater{% endblock %}
+
+{% block content %}
+    <div class="status-info">
+        {% if desired_state %}
+            <div class="time-display">
+                <div class="real-time">
+                    Actually ON: <span id="accumulated-time">{{ (accumulated_time // 60)|int }}m {{ (accumulated_time % 60)|int }}s</span>
+                </div>
+                {% if enforcement_active %}
+                    <div class="enforcement-status">
+                        <span class="enforcement-indicator">🔄</span>
+                        Continuous enforcement active
+                        {% if actual_device_state != desired_state %}
+                            <span class="sync-warning">⚠️ Device sync in progress</span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    
+    <div class="control-section">
+        <button 
+            id="heater-button" 
+            class="heater-btn {{ 'on' if desired_state else 'off' }}"
+            onclick="toggleHeater()"
+        >
+            <div class="button-content">
+                <div class="status-icon">{{ '🔥' if desired_state else '❄️' }}</div>
+                <div class="status-text">{{ 'ON' if desired_state else 'OFF' }}</div>
+                <div class="tap-hint">Tap to {{ 'turn OFF' if desired_state else 'turn ON' }}</div>
+            </div>
+        </button>
+    </div>
+    
+    <div class="loading-indicator" id="loading" style="display: none;">
+        <div class="spinner"></div>
+        <span>Updating...</span>
+    </div>
+
+    <script>
+        let currentState = {{ 'true' if desired_state else 'false' }};
+        let actualDeviceState = {{ 'true' if actual_device_state else 'false' }};
+        let accumulatedTime = {{ accumulated_time }};
+        let lastUpdateTime = Date.now();
+        
+        function toggleHeater() {
+            const button = document.getElementById('heater-button');
+            const loading = document.getElementById('loading');
+            
+            button.disabled = true;
+            loading.style.display = 'flex';
+            
+            fetch('/toggle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Toggle response:', data);
+                if (data.success) {
+                    currentState = data.new_state;
+                    actualDeviceState = data.actual_device_state;
+                    accumulatedTime = data.accumulated_seconds;
+                    lastUpdateTime = Date.now();
+                    
+                    updateButton();
+                    
+                    if (currentState) {
+                        startTimeUpdater();
+                    } else {
+                        stopTimeUpdater();
+                    }
+                } else {
+                    console.error('Toggle failed:', data.error);
+                    alert('Failed to update heater state: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to update heater state. Please try again.');
+            })
+            .finally(() => {
+                button.disabled = false;
+                loading.style.display = 'none';
+            });
+        }
+        
+        function updateButton() {
+            const button = document.getElementById('heater-button');
+            const statusIcon = button.querySelector('.status-icon');
+            const statusText = button.querySelector('.status-text');
+            const tapHint = button.querySelector('.tap-hint');
+            
+            if (currentState) {
+                button.className = 'heater-btn on';
+                statusIcon.textContent = '🔥';
+                statusText.textContent = 'ON';
+                tapHint.textContent = 'Tap to turn OFF';
+            } else {
+                button.className = 'heater-btn off';
+                statusIcon.textContent = '❄️';
+                statusText.textContent = 'OFF';
+                tapHint.textContent = 'Tap to turn ON';
+            }
+        }
+        
+        let timeUpdater;
+        
+        function startTimeUpdater() {
+            const timeDisplay = document.getElementById('accumulated-time');
+            const statusInfo = document.querySelector('.status-info');
+            
+            statusInfo.style.display = 'block';
+            
+            // Update time display immediately with current accumulated time
+            updateTimeDisplay();
+            
+            timeUpdater = setInterval(() => {
+                if (currentState) {
+                    updateTimeDisplay();
+                }
+            }, 1000);
+            
+            // Refresh server state every 10 seconds for accurate device verification
+            setInterval(() => {
+                if (currentState) {
+                    refreshServerState();
+                }
+            }, 10000);
+        }
+        
+        function updateTimeDisplay() {
+            const timeDisplay = document.getElementById('accumulated-time');
+            // ONLY show server-verified accumulated time, don't add client-side elapsed time
+            const minutes = Math.floor(accumulatedTime / 60);
+            const seconds = accumulatedTime % 60;
+            timeDisplay.textContent = `${minutes}m ${seconds}s`;
+        }
+        
+        function refreshServerState() {
+            fetch('/status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.current_state) {
+                    const serverState = data.current_state;
+                    accumulatedTime = serverState.accumulated_seconds || 0;
+                    
+                    // Add time since last verification if device is actually ON
+                    if (serverState.actual_device_state && serverState.last_verified_on_time) {
+                        const lastVerified = new Date(serverState.last_verified_on_time + 'Z');
+                        const additionalSeconds = Math.floor((Date.now() - lastVerified.getTime()) / 1000);
+                        accumulatedTime += additionalSeconds;
+                    }
+                    
+                    lastUpdateTime = Date.now();
+                    actualDeviceState = serverState.actual_device_state || false;
+                }
+            })
+            .catch(error => {
+                console.error('Error refreshing state:', error);
+            });
+        }
+        
+        function stopTimeUpdater() {
+            const statusInfo = document.querySelector('.status-info');
+            statusInfo.style.display = 'none';
+            
+            if (timeUpdater) {
+                clearInterval(timeUpdater);
+                timeUpdater = null;
+            }
+        }
+        
+        // Start time updater if heater is ON
+        if (currentState) {
+            startTimeUpdater();
+        }
+    </script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-info {
+        margin-bottom: 1.5rem;
+        display: {{ 'block' if desired_state else 'none' }};
+    }
+    
+    .time-display {
+        background: #e6fffa;
+        border: 2px solid #38b2ac;
+        border-radius: 12px;
+        padding: 0.75rem;
+        font-size: 1rem;
+        color: #234e52;
+    }
+    
+    .real-time {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    
+    .enforcement-status {
+        font-size: 0.85rem;
+        font-weight: normal;
+        color: #2d5aa0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .enforcement-indicator {
+        animation: spin 2s linear infinite;
+    }
+    
+    .sync-warning {
+        color: #d69e2e;
+        font-weight: 600;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .control-section {
+        margin: 2rem 0;
+    }
+    
+    .heater-btn {
+        width: 200px;
+        height: 200px;
+        border: none;
+        border-radius: 50%;
+        font-size: 1.2rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .heater-btn:before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        border-radius: 50%;
+        transition: all 0.3s ease;
+    }
+    
+    .heater-btn.on {
+        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+        color: white;
+    }
+    
+    .heater-btn.on:before {
+        box-shadow: inset 0 0 50px rgba(255,255,255,0.1);
+    }
+    
+    .heater-btn.off {
+        background: linear-gradient(135deg, #4ecdc4, #44a08d);
+        color: white;
+    }
+    
+    .heater-btn.off:before {
+        box-shadow: inset 0 0 50px rgba(255,255,255,0.1);
+    }
+    
+    .heater-btn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 12px 35px rgba(0,0,0,0.2);
+    }
+    
+    .heater-btn:active {
+        transform: scale(0.95);
+    }
+    
+    .heater-btn:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .button-content {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 0.5rem;
+    }
+    
+    .status-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .status-text {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+    
+    .tap-hint {
+        font-size: 0.8rem;
+        opacity: 0.8;
+        font-weight: normal;
+    }
+    
+    .loading-indicator {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        color: #667eea;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+    }
+    
+    .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #e2e8f0;
+        border-top: 2px solid #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* Mobile optimizations */
+    @media (max-width: 480px) {
+        .heater-btn {
+            width: 180px;
+            height: 180px;
+        }
+        
+        .status-icon {
+            font-size: 2rem;
+        }
+        
+        .status-text {
+            font-size: 1.3rem;
+        }
+        
+        .tap-hint {
+            font-size: 0.75rem;
+        }
+    }
+</style>
+{% endblock %}
