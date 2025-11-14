@@ -1,9 +1,12 @@
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from azure.data.tables import TableServiceClient, TableEntity
 from azure.core.exceptions import ResourceNotFoundError
+
+logger = logging.getLogger(__name__)
 
 class StateManager:
     def __init__(self):
@@ -17,6 +20,7 @@ class StateManager:
         # Ensure table exists
         self.table_client = self.table_service.get_table_client(self.table_name)
         self._ensure_table_exists()
+        logger.info("Initialized StateManager for table %s", self.table_name)
 
     def _ensure_table_exists(self):
         """Ensure the Azure Table exists, create if it doesn't"""
@@ -27,13 +31,13 @@ class StateManager:
             # Table doesn't exist, create it
             try:
                 self.table_service.create_table(self.table_name)
-                print(f"✓ Created Azure Table: {self.table_name}")
+                logger.info("Created Azure Table %s", self.table_name)
             except Exception as e:
-                print(f"⚠️  Could not create table {self.table_name}: {e}")
+                logger.warning("Could not create table %s: %s", self.table_name, e)
                 # Continue anyway, might be a permissions issue
         except Exception:
             # Table exists or other error, continue
-            pass
+            logger.debug("Azure Table %s already exists or could not be verified, continuing", self.table_name)
 
     def get_current_state(self) -> Dict[str, Any]:
         """Get current water heater state"""
@@ -43,7 +47,7 @@ class StateManager:
                 row_key="current"
             )
             
-            return {
+            state = {
                 "desired_state": entity.get("desired_state", False),
                 "actual_device_state": entity.get("actual_device_state", False),
                 "manual_override": entity.get("manual_override", False),
@@ -54,6 +58,10 @@ class StateManager:
                 "last_state_change": entity.get("last_state_change"),
                 "last_schedule_check": entity.get("last_schedule_check")
             }
+            logger.info("Fetched current state: desired=%s actual=%s last_verified_on_time=%s manual_override=%s accum=%s",
+                         state["desired_state"], state["actual_device_state"],
+                         state["last_verified_on_time"], state["manual_override"], state["accumulated_seconds"])
+            return state
         except ResourceNotFoundError:
             # Initialize default state
             default_state = {
@@ -70,6 +78,7 @@ class StateManager:
                 "last_schedule_check": None
             }
             self.table_client.create_entity(default_state)
+            logger.info("Created default state row in %s", self.table_name)
             return {k: v for k, v in default_state.items() if not k.startswith(('PartitionKey', 'RowKey'))}
 
     def set_desired_state(self, desired_state: bool, manual_override: bool = False) -> None:
@@ -114,6 +123,8 @@ class StateManager:
         })
         
         self.table_client.upsert_entity(update_entity)
+        logger.info("Desired state updated from %s to %s (manual_override=%s)",
+                    current_state["desired_state"], desired_state, manual_override)
 
     def update_actual_device_state(self, actual_state: bool, timestamp: Optional[datetime] = None) -> None:
         """Update actual device state and accumulate real ON time"""
@@ -149,6 +160,11 @@ class StateManager:
         }
         
         self.table_client.upsert_entity(update_entity)
+        if current_state.get("actual_device_state") != actual_state:
+            logger.info("Actual device state updated from %s to %s (accumulated=%s)",
+                        current_state.get("actual_device_state"), actual_state, accumulated_seconds)
+        else:
+            logger.debug("Actual device state re-verified as %s", actual_state)
 
     def update_last_successful_command(self, timestamp: Optional[datetime] = None) -> None:
         """Update timestamp of last successful command"""
@@ -169,6 +185,7 @@ class StateManager:
         }
         
         self.table_client.upsert_entity(update_entity)
+        logger.info("Recorded last successful command at %s", timestamp.isoformat())
 
     def update_accumulated_time(self, additional_seconds: int) -> None:
         """Update accumulated ON time"""
@@ -187,6 +204,8 @@ class StateManager:
         }
         
         self.table_client.upsert_entity(update_entity)
+        logger.debug("Accumulated time increased by %s seconds (total=%s)",
+                     additional_seconds, update_entity["accumulated_seconds"])
 
     def update_last_schedule_check(self, timestamp: Optional[datetime] = None) -> None:
         """Update timestamp of last schedule check"""
@@ -207,6 +226,7 @@ class StateManager:
         }
         
         self.table_client.upsert_entity(update_entity)
+        logger.debug("Updated last schedule check to %s", timestamp.isoformat())
 
     def clear_manual_override(self) -> None:
         """Clear manual override flag"""
@@ -225,6 +245,7 @@ class StateManager:
         }
         
         self.table_client.upsert_entity(update_entity)
+        logger.info("Cleared manual override flag")
 
     def get_time_ranges(self) -> List[Dict[str, Any]]:
         """Get all configured time ranges"""
@@ -242,9 +263,12 @@ class StateManager:
                     "enabled": entity.get("enabled", True)
                 })
             
-            return sorted(ranges, key=lambda x: x["start_time"])
+            ranges = sorted(ranges, key=lambda x: x["start_time"])
+            logger.debug("Fetched %s time ranges", len(ranges))
+            return ranges
             
         except Exception:
+            logger.exception("Failed to fetch time ranges")
             return []
 
     def add_time_range(self, start_time: str, end_time: str) -> str:
@@ -260,6 +284,7 @@ class StateManager:
         }
         
         self.table_client.create_entity(entity)
+        logger.info("Added time range %s from %s to %s", range_id, start_time, end_time)
         return range_id
 
     def delete_time_range(self, range_id: str) -> None:
@@ -269,8 +294,9 @@ class StateManager:
                 partition_key="schedule",
                 row_key=range_id
             )
+            logger.info("Deleted time range %s", range_id)
         except ResourceNotFoundError:
-            pass  # Already deleted
+            logger.warning("Attempted to delete missing time range %s", range_id)
 
     def toggle_time_range(self, range_id: str) -> None:
         """Toggle time range enabled/disabled"""
@@ -282,14 +308,16 @@ class StateManager:
             
             entity["enabled"] = not entity.get("enabled", True)
             self.table_client.update_entity(entity)
+            logger.info("Toggled time range %s to enabled=%s", range_id, entity["enabled"])
             
         except ResourceNotFoundError:
-            pass
+            logger.warning("Attempted to toggle missing time range %s", range_id)
 
     def is_in_scheduled_time(self, current_time: datetime) -> bool:
         """Check if current time falls within any scheduled range"""
         time_ranges = self.get_time_ranges()
         current_time_str = current_time.strftime("%H:%M")
+        in_range = False
         
         for time_range in time_ranges:
             if not time_range.get("enabled", True):
@@ -301,13 +329,16 @@ class StateManager:
             if start_time <= end_time:
                 # Same day range (e.g., 09:00 to 17:00)
                 if start_time <= current_time_str <= end_time:
-                    return True
+                    in_range = True
+                    break
             else:
                 # Overnight range (e.g., 23:00 to 06:00)
                 if current_time_str >= start_time or current_time_str <= end_time:
-                    return True
+                    in_range = True
+                    break
         
-        return False
+        logger.info("Checked scheduled time for %s -> %s", current_time_str, in_range)
+        return in_range
 
     def should_state_change_for_schedule(self, israel_time: datetime) -> Optional[bool]:
         """Determine if state should change based on schedule - NEW LOGIC: 
@@ -332,6 +363,10 @@ class StateManager:
             # Clear manual override on any scheduled period transition
             # This allows scheduled periods to always take effect
             if should_be_on != current_desired_state:
+                logger.info(
+                    "Schedule transition detected (%s -> %s). Desired state will be set to %s",
+                    was_in_scheduled_time, should_be_on, should_be_on
+                )
                 return should_be_on  # Transition: follow the schedule
         else:
             # Within same scheduled period - check for manual override protection
@@ -340,10 +375,14 @@ class StateManager:
                 # Only protect manual override if it was recent (within current period)
                 # and we're not at a schedule boundary
                 if datetime.utcnow() - last_change < timedelta(minutes=30):  # Reduced from 24 hours
+                    logger.info("Manual override still active (last_change=%s). Keeping desired state %s",
+                                current_state["last_state_change"], current_desired_state)
                     return None  # Keep current state due to recent manual override
         
         # Normal case: set state if different from what schedule requires
         if should_be_on != current_desired_state:
+            logger.info("Schedule recommends changing desired state from %s to %s", current_desired_state, should_be_on)
             return should_be_on
         
+        logger.info("Schedule check resulted in no change (should_be_on=%s current=%s)", should_be_on, current_desired_state)
         return None  # No change needed

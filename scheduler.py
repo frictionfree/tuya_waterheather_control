@@ -27,6 +27,8 @@ class BackgroundScheduler:
             
             # Early exit optimization: Skip if actual state already matches desired state
             if actual_device_state == desired_state:
+                # Persist verification so state table reflects the latest device status
+                self.state_manager.update_actual_device_state(actual_device_state)
                 return {
                     "status": "skipped",
                     "reason": "Actual device state matches desired state", 
@@ -39,10 +41,10 @@ class BackgroundScheduler:
             # Execute state enforcement to match desired state
             if desired_state:
                 # For ON state: Continuous enforcement with verification
-                result = self.tuya_client.ensure_state_with_retries(True, max_attempts=1)
+                result = self.tuya_client.ensure_state_with_retries(True, max_attempts=7)
             else:
                 # For OFF state: Single attempt 
-                result = self.tuya_client.set_device_state(False)
+                result = self.tuya_client.set_device_state(False, max_attempts=1)
                 
             # Re-verify device state after command execution
             actual_device_state_after = self._verify_actual_device_state()
